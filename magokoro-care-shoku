@@ -1,0 +1,34 @@
+export default {
+  async fetch(request, env, ctx) {
+    // 【修正後】転送先の新しいベースURL（末尾のスラッシュは無し）
+    const NEW_BASE_URL = "https://stg-magokorocare-shoku.com";
+
+    // 1. 元のリクエストからURL情報を解析
+    const oldUrl = new URL(request.url);
+
+    // 2. 新しいURLを組み立て（後ろのパス「/api/v1/...」や「?query=xxx」をそのまま結合）
+    const newUrlString = `${NEW_BASE_URL}${oldUrl.pathname}${oldUrl.search}`;
+
+    // 3. 元のリクエストのメソッド、ヘッダー、Bodyをコピーして新しいリクエストを作成
+    const newRequestInit = {
+      method: request.method,
+      headers: request.headers,
+      redirect: "manual" // リダイレクトをWorker側で勝手に追わずにそのまま返す
+    };
+
+    // GETやHEAD以外の場合は、Body（JSONデータなど）もそのままコピー
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      newRequestInit.body = await request.text();
+    }
+
+    // 4. 新しいURLへリクエストを転送（プロキシ）
+    try {
+      const response = await fetch(newUrlString, newRequestInit);
+      
+      // 5. 転送先から返ってきたレスポンスを、そのまま元の送信元に返す
+      return response;
+    } catch (error) {
+      return new Response(`転送に失敗しました: ${error.message}`, { status: 500 });
+    }
+  },
+};
