@@ -1,0 +1,74 @@
+export default {
+  async fetch(request, env, ctx) {
+    const FORWARD_URL = "https://kitapi-us.voximplant.com/api/v2/outbound/appendToCampaign";
+    const TARGET_CAMPAIGN_ID = "113734"; // 固定したいキャンペーンID
+
+    const method = request.method.toUpperCase();
+    
+    const headers = new Headers();
+    headers.set("Content-Type", "application/x-www-form-urlencoded");
+    if (request.headers.has("user-agent")) {
+      headers.set("user-agent", request.headers.get("user-agent"));
+    }
+
+    let fetchOptions = {
+      method: method,
+      headers: headers,
+      redirect: "follow"
+    };
+
+    if (method !== "GET" && method !== "HEAD") {
+      // 1. 届いたリクエストから生のテキストデータを取得
+      let rawText = await request.text();
+
+      // 2. 「URLSearchParams」の仕組みを使ってパラメータを安全に分解・操作
+      const params = new URLSearchParams(rawText);
+
+      // ★【今回の追加】campaign_id が何できても 113670 に強制上書き
+      params.set("campaign_id", TARGET_CAMPAIGN_ID);
+
+      // 3. 「rows」パラメータの中に含まれる「callee」を「phone」に書き換える
+      if (params.has("rows")) {
+        let rowsValue = params.get("rows");
+        try {
+          // JSONとしてパース
+          const rowsData = JSON.parse(rowsValue);
+          
+          // 配列内のオブジェクトのキーを「callee」から「phone」に置換
+          const updatedRows = rowsData.map(row => {
+            if (row.hasOwnProperty("callee")) {
+              row.phone = row.callee;
+              delete row.callee;
+            }
+            return row;
+          });
+          
+          // 書き換えたオブジェクトを再度文字列に戻してセット
+          params.set("rows", JSON.stringify(updatedRows));
+        } catch (jsonErr) {
+          // 万が一JSONパースに失敗した場合は、安全のため従来の文字列置換をフォールバックとして実行
+          if (rowsValue.includes("callee")) {
+            rowsValue = rowsValue.replace(/callee=/g, "phone=");
+            rowsValue = rowsValue.replace(/%22callee%22/g, "%22phone%22");
+            rowsValue = rowsValue.replace(/"callee"/g, '"phone"');
+            params.set("rows", rowsValue);
+          }
+        }
+      }
+
+      // 4. すべての書き換えが完了したデータをBodyにセット
+      fetchOptions.body = params.toString();
+    }
+
+    try {
+      const response = await fetch(FORWARD_URL, fetchOptions);
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+      });
+    } catch (error) {
+      return new Response(`Forwarding to Voximplant failed: ${error.message}`, { status: 500 });
+    }
+  },
+};
